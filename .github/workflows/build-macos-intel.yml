@@ -1,0 +1,103 @@
+name: Build macOS Intel (x86_64)
+
+# Fork-only workflow: builds the macOS Intel (x86_64) bundle that the
+# upstream workflow (build.yml, macos-latest = Apple Silicon only)
+# does not produce. Kept as a separate file so merging upstream
+# changes never conflicts with this one.
+#
+# This runner label is the LAST Intel macOS image GitHub provides for
+# the standard (free) tier. macOS 13 was retired Dec 2025; macos-15-intel
+# is guaranteed until August 2027.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-intel:
+    runs-on: macos-15-intel
+    env:
+      # Same network hardening as upstream build.yml.
+      CARGO_HTTP_MULTIPLEXING: "false"
+      CARGO_NET_RETRY: "5"
+      CARGO_HTTP_TIMEOUT: "60"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable (x86_64-apple-darwin)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install protoc
+        run: brew install protobuf
+
+      # tauri.macos.conf.json bundles src-tauri/pdfium/libpdfium.dylib
+      # as the app framework. The committed file is the arm64 build, so
+      # before compiling we swap in the Intel binary that the repo ships
+      # as libpdfium-x86_64.dylib. Checksummed first so we only ever
+      # swap an intact binary.
+      - name: Verify built-in PDFium checksums
+        run: shasum -a 256 -c src-tauri/pdfium/SHA256SUMS
+
+      - name: Use Intel x86_64 PDFium binary
+        run: |
+          cp src-tauri/pdfium/libpdfium-x86_64.dylib src-tauri/pdfium/libpdfium.dylib
+          file src-tauri/pdfium/libpdfium.dylib
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Prepare MCP server resources
+        run: |
+          npm --prefix mcp-server ci
+          npm run mcp:build
+
+      - name: Build Tauri app for x86_64-apple-darwin
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No APPLE_* secrets on the fork: tauri-action then skips
+          # signing/notarization and produces an unsigned DMG, which is
+          # fine for personal use.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: ${{ github.event_name == 'push' && github.ref_name || '' }}
+          releaseName: ${{ github.event_name == 'push' && format('LLM Wiki {0}', github.ref_name) || '' }}
+          releaseBody: 'See the assets below for download links.'
+          releaseDraft: false
+          prerelease: false
+          args: --target x86_64-apple-darwin
+
+      - name: Upload Intel bundles as workflow artifacts (manual runs only)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-macos-intel
+          path: |
+            src-tauri/target/**/release/bundle/dmg/*.dmg
+            src-tauri/target/**/release/bundle/macos/*.app
+          if-no-files-found: warn
+          retention-days: 14
