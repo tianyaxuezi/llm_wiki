@@ -74,15 +74,13 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # No APPLE_* secrets on the fork: tauri-action then skips
-          # signing/notarization and produces an unsigned DMG, which is
-          # fine for personal use.
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # IMPORTANT: do NOT set the APPLE_* env vars here. When a
+          # secret is missing, GitHub injects an EMPTY string, and the
+          # Tauri bundler treats a present-but-empty APPLE_CERTIFICATE
+          # as a signing request → "security import" fails → the build
+          # errors out. With no vars at all, signing is simply skipped
+          # and an unsigned DMG is produced (fine for personal use).
+          # Only re-add them if you have real signing secrets.
         with:
           tagName: ${{ github.event_name == 'push' && github.ref_name || '' }}
           releaseName: ${{ github.event_name == 'push' && format('LLM Wiki {0}', github.ref_name) || '' }}
