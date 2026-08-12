@@ -1181,7 +1181,7 @@ pub async fn run_web_search(
         return Err("Web search provider is not configured.".to_string());
     }
     let max_results = web_search_result_limit(&provider, top_k);
-    let client = reqwest::Client::builder()
+    let client = crate::proxy::configure_http_client(reqwest::Client::builder())
         .timeout(std::time::Duration::from_secs(WEB_SEARCH_TIMEOUT_SECS))
         .build()
         .map_err(|err| format!("Failed to build web search client: {err}"))?;
@@ -1242,7 +1242,7 @@ pub async fn run_anytxt_search(
         .filter_ext
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "*".to_string());
-    let client = reqwest::Client::builder()
+    let client = crate::proxy::configure_http_client(reqwest::Client::builder())
         .timeout(std::time::Duration::from_secs(WEB_SEARCH_TIMEOUT_SECS))
         .build()
         .map_err(|err| format!("Failed to build AnyTXT client: {err}"))?;
@@ -2828,6 +2828,11 @@ mod tests {
         let root = std::env::temp_dir().join(format!("llm-wiki-context-{}", Uuid::new_v4()));
         fs::create_dir_all(root.join(".llm-wiki")).unwrap();
         fs::create_dir_all(root.join("wiki/entities")).unwrap();
+        fs::write(
+            root.join(".llm-wiki/history-settings.json"),
+            r#"{"enabled":true,"maxVersionsPerFile":10}"#,
+        )
+        .unwrap();
         let alpha = root.join("wiki/entities/alpha.md");
         let beta = root.join("wiki/entities/beta.md");
         fs::write(
